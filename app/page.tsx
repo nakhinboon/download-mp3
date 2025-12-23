@@ -6,22 +6,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { URLInput } from "@/components/url-input";
 import { VideoInfoDisplay } from "@/components/video-info-display";
 import { QualitySelector } from "@/components/quality-selector";
-import { DownloadProgress } from "@/components/download-progress";
 import { DownloadHistory } from "@/components/download-history";
 import { VideoInfo, QualityOption } from "@/lib/video-extractor";
-import { DownloadTask } from "@/lib/download-manager";
 
 export default function Home() {
   const [platform, setPlatform] = useState<"youtube" | "tiktok">("youtube");
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [selectedQuality, setSelectedQuality] = useState<QualityOption | null>(null);
-  const [downloadTask, setDownloadTask] = useState<DownloadTask | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleVideoInfoLoaded = (info: VideoInfo) => {
     setVideoInfo(info);
     setSelectedQuality(null);
-    setDownloadTask(null);
     setError(null);
   };
 
@@ -35,18 +31,9 @@ export default function Home() {
     setSelectedQuality(quality);
   };
 
-  const handleDownloadStart = (task: DownloadTask) => {
-    setDownloadTask(task);
-  };
-
-  const handleDownloadComplete = () => {
-    setDownloadTask(null);
-  };
-
   const handleReset = () => {
     setVideoInfo(null);
     setSelectedQuality(null);
-    setDownloadTask(null);
     setError(null);
   };
 
@@ -93,24 +80,15 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {videoInfo && !downloadTask && (
+        {videoInfo && (
           <VideoInfoDisplay videoInfo={videoInfo} />
         )}
 
-        {videoInfo && !downloadTask && (
+        {videoInfo && (
           <QualitySelector
             videoInfo={videoInfo}
             selectedQuality={selectedQuality}
             onQualitySelect={handleQualitySelect}
-            onDownloadStart={handleDownloadStart}
-          />
-        )}
-
-        {downloadTask && (
-          <DownloadProgress
-            task={downloadTask}
-            onComplete={handleDownloadComplete}
-            onCancel={handleReset}
           />
         )}
 

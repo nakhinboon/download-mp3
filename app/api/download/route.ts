@@ -1,126 +1,173 @@
 /**
  * Download API Endpoint
- * POST /api/download
- * Accepts video info and quality, returns download stream
- * 
- * Requirements: 1.2, 1.3, 2.1, 2.2
+ * Uses yt-dlp for reliable YouTube downloads
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { VideoInfo, QualityOption } from '@/lib/video-extractor';
-import { startDownload, startMP3Download, getDownloadTask, DownloadTask } from '@/lib/download-manager';
+import { NextRequest, NextResponse } from "next/server";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { readFile, unlink, mkdir, readdir } from "fs/promises";
+import { existsSync } from "fs";
+import path from "path";
+import { randomUUID } from "crypto";
 
-export interface DownloadRequest {
-  videoInfo: VideoInfo;
-  quality: QualityOption;
-  audioMetadata?: {
-    title?: string;
-    artist?: string;
-    album?: string;
-  };
-}
+const execAsync = promisify(exec);
 
-export interface DownloadResponse {
-  taskId: string;
-  status: DownloadTask['status'];
-  message: string;
-}
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
-export interface DownloadErrorResponse {
-  error: string;
-  code: 'INVALID_REQUEST' | 'QUALITY_UNAVAILABLE' | 'DOWNLOAD_FAILED' | 'MISSING_VIDEO_INFO';
-}
+// Temp directory for downloads
+const TEMP_DIR = path.join(process.cwd(), "tmp");
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json() as DownloadRequest;
-    
-    // Validate request body
-    if (!body.videoInfo || !body.videoInfo.id) {
-      return NextResponse.json<DownloadErrorResponse>(
-        { error: 'ข้อมูลวิดีโอไม่ถูกต้อง', code: 'MISSING_VIDEO_INFO' },
-        { status: 400 }
-      );
-    }
-
-    if (!body.quality) {
-      return NextResponse.json<DownloadErrorResponse>(
-        { error: 'กรุณาเลือกคุณภาพวิดีโอ', code: 'INVALID_REQUEST' },
-        { status: 400 }
-      );
-    }
-
-    // Check if quality is available
-    if (!body.quality.available) {
-      return NextResponse.json<DownloadErrorResponse>(
-        { error: 'คุณภาพที่เลือกไม่พร้อมใช้งานสำหรับวิดีโอนี้', code: 'QUALITY_UNAVAILABLE' },
-        { status: 400 }
-      );
-    }
-
-    let task: DownloadTask;
-
-    // Start download based on format
-    if (body.quality.format === 'mp3') {
-      // MP3 audio extraction (Requirements: 2.1, 2.2)
-      task = startMP3Download(body.videoInfo, body.audioMetadata);
-    } else {
-      // MP4 video download (Requirements: 1.2, 1.3)
-      task = startDownload(body.videoInfo, body.quality);
-    }
-
-    const response: DownloadResponse = {
-      taskId: task.id,
-      status: task.status,
-      message: 'เริ่มดาวน์โหลดแล้ว',
-    };
-
-    return NextResponse.json(response, { status: 200 });
-    
-  } catch (error) {
-    console.error('Download error:', error);
-    
-    const errorMessage = error instanceof Error ? error.message : 'ไม่สามารถเริ่มดาวน์โหลดได้';
-    
-    return NextResponse.json<DownloadErrorResponse>(
-      { error: errorMessage, code: 'DOWNLOAD_FAILED' },
-      { status: 500 }
-    );
+async function ensureTempDir() {
+  if (!existsSync(TEMP_DIR)) {
+    await mkdir(TEMP_DIR, { recursive: true });
   }
 }
 
-/**
- * GET /api/download?taskId=xxx
- * Get download progress for a specific task
- */
+// Helper to clean up all temp files with given prefix
+async function cleanupTempFiles(prefix: string) {
+  try {
+    const files = await readdir(TEMP_DIR);
+    const baseName = path.basename(prefix);
+    for (const file of files) {
+      if (file.startsWith(baseName)) {
+        try {
+          await unlink(path.join(TEMP_DIR, file));
+        } catch { /* ignore */ }
+      }
+    }
+  } catch { /* ignore */ }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const taskId = searchParams.get('taskId');
+    let url = searchParams.get("url");
+    const format = searchParams.get("format") || "mp4";
+    const quality = searchParams.get("quality") || "1080p";
 
-    if (!taskId) {
-      return NextResponse.json<DownloadErrorResponse>(
-        { error: 'กรุณาระบุ taskId', code: 'INVALID_REQUEST' },
-        { status: 400 }
-      );
+    if (!url) {
+      return NextResponse.json({ error: "กรุณาระบุ URL" }, { status: 400 });
     }
 
-    const task = getDownloadTask(taskId);
-
-    if (!task) {
-      return NextResponse.json<DownloadErrorResponse>(
-        { error: 'ไม่พบงานดาวน์โหลด', code: 'INVALID_REQUEST' },
-        { status: 404 }
-      );
+    // Clean URL
+    try {
+      const urlObj = new URL(url);
+      urlObj.searchParams.delete("list");
+      urlObj.searchParams.delete("start_radio");
+      urlObj.searchParams.delete("index");
+      url = urlObj.toString();
+    } catch {
+      // Keep original
     }
 
-    return NextResponse.json(task, { status: 200 });
+    await ensureTempDir();
+
+    // Build yt-dlp command with explicit output path
+    let cmd: string;
+    let ext: string;
+    const fileId = randomUUID();
+    const outputTemplate = path.join(TEMP_DIR, fileId);
     
+    if (format === "mp3") {
+      ext = "mp3";
+      // Use best audio quality (320kbps) with high quality conversion
+      cmd = `yt-dlp -x --audio-format mp3 --audio-quality 0 --postprocessor-args "-b:a 320k" -P "${TEMP_DIR}" -o "${fileId}.%(ext)s" "${url}"`;
+    } else {
+      ext = "mp4";
+      // Map quality to yt-dlp format selector
+      const qualityMap: Record<string, string> = {
+        "360p": "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]",
+        "480p": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]",
+        "720p": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]",
+        "1080p": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]",
+      };
+      const formatSelector = qualityMap[quality] || qualityMap["1080p"];
+      cmd = `yt-dlp -f "${formatSelector}" --merge-output-format mp4 -P "${TEMP_DIR}" -o "${fileId}.%(ext)s" "${url}"`;
+    }
+
+    console.log("Running yt-dlp:", cmd);
+    console.log("Output will be:", `${outputTemplate}.${ext}`);
+
+    // Execute yt-dlp
+    const { stdout, stderr } = await execAsync(cmd, { 
+      timeout: 300000,
+      maxBuffer: 50 * 1024 * 1024 
+    });
+    
+    console.log("yt-dlp stdout:", stdout);
+    if (stderr) console.log("yt-dlp stderr:", stderr);
+
+    // Find the output file
+    const outputFile = `${outputTemplate}.${ext}`;
+    
+    if (!existsSync(outputFile)) {
+      // List files to debug
+      console.log("Expected file not found:", outputFile);
+      try {
+        const files = await readdir(TEMP_DIR);
+        console.log("Files in tmp:", files);
+        
+        // Try to find file with our ID
+        const matchingFile = files.find(f => f.startsWith(fileId));
+        if (matchingFile) {
+          const actualFile = path.join(TEMP_DIR, matchingFile);
+          console.log("Found matching file:", actualFile);
+          
+          const fileBuffer = await readFile(actualFile);
+          const titleMatch = stdout.match(/\[download\] Destination: .*?([^\\\/]+)\.\w+$/m);
+          const title = titleMatch ? titleMatch[1] : "download";
+          const actualExt = path.extname(matchingFile).slice(1) || ext;
+          const filename = `${title}.${actualExt}`;
+          
+          // Clean up
+          await cleanupTempFiles(outputTemplate);
+          
+          const contentType = format === "mp3" ? "audio/mpeg" : "video/mp4";
+          return new NextResponse(fileBuffer, {
+            status: 200,
+            headers: {
+              "Content-Type": contentType,
+              "Content-Length": fileBuffer.length.toString(),
+              "Content-Disposition": `attachment; filename="${encodeURIComponent(filename)}"`,
+              "Cache-Control": "no-store",
+            },
+          });
+        }
+      } catch (e) {
+        console.log("Error listing files:", e);
+      }
+      return NextResponse.json({ error: "ไฟล์ไม่ถูกสร้าง" }, { status: 500 });
+    }
+
+    // Read file
+    const fileBuffer = await readFile(outputFile);
+    
+    // Get title from yt-dlp output or use default
+    const titleMatch = stdout.match(/\[download\] Destination: .*?([^\\\/]+)\.\w+$/m);
+    const title = titleMatch ? titleMatch[1] : "download";
+    const filename = `${title}.${ext}`;
+
+    // Clean up temp file and any related files
+    await cleanupTempFiles(outputTemplate);
+
+    const contentType = format === "mp3" ? "audio/mpeg" : "video/mp4";
+
+    return new NextResponse(fileBuffer, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Content-Length": fileBuffer.length.toString(),
+        "Content-Disposition": `attachment; filename="${encodeURIComponent(filename)}"`,
+        "Cache-Control": "no-store",
+      },
+    });
   } catch (error) {
-    console.error('Get download progress error:', error);
+    console.error("Download error:", error);
     
-    return NextResponse.json<DownloadErrorResponse>(
-      { error: 'ไม่สามารถดึงข้อมูลความคืบหน้าได้', code: 'DOWNLOAD_FAILED' },
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Download failed" },
       { status: 500 }
     );
   }

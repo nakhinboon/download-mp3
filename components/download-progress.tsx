@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -44,40 +44,58 @@ function formatFileSize(bytes: number): string {
 
 export function DownloadProgress({ task: initialTask, onComplete, onCancel }: DownloadProgressProps) {
   const [task, setTask] = useState<DownloadTask>(initialTask);
+  const onCompleteRef = useRef(onComplete);
+  const hasCalledComplete = useRef(false);
+  const hasSavedToHistory = useRef(false);
 
-  const updateTask = useCallback(() => {
-    const updatedTask = getDownloadTask(initialTask.id);
-    if (updatedTask) {
-      setTask(updatedTask);
-      
-      if (updatedTask.status === "completed") {
-        // Save to history
-        const record = createRecordFromDownload(
-          updatedTask.videoInfo,
-          updatedTask.quality,
-          updatedTask.videoInfo.id
-        );
-        saveDownload(record);
+  // Keep ref updated with latest callback
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const updatedTask = getDownloadTask(initialTask.id);
+      if (updatedTask) {
+        setTask(prev => {
+          // Only update if something changed to avoid unnecessary re-renders
+          if (prev.status === updatedTask.status && 
+              prev.progress.percentage === updatedTask.progress.percentage) {
+            return prev;
+          }
+          return updatedTask;
+        });
+        
+        // Save to history only once when completed
+        if (updatedTask.status === "completed" && !hasSavedToHistory.current) {
+          hasSavedToHistory.current = true;
+          const record = createRecordFromDownload(
+            updatedTask.videoInfo,
+            updatedTask.quality,
+            updatedTask.videoInfo.id
+          );
+          saveDownload(record);
+        }
       }
-    }
+    }, 100);
+    return () => clearInterval(interval);
   }, [initialTask.id]);
 
   useEffect(() => {
-    const interval = setInterval(updateTask, 100);
-    return () => clearInterval(interval);
-  }, [updateTask]);
-
-  useEffect(() => {
-    if (task.status === "completed") {
-      const timeout = setTimeout(onComplete, 2000);
+    if (task.status === "completed" && !hasCalledComplete.current) {
+      hasCalledComplete.current = true;
+      const timeout = setTimeout(() => {
+        onCompleteRef.current();
+      }, 2000);
       return () => clearTimeout(timeout);
     }
-  }, [task.status, onComplete]);
+  }, [task.status]);
 
   const handlePause = () => {
     try {
       pauseDownload(task.id);
-      updateTask();
+      const updatedTask = getDownloadTask(task.id);
+      if (updatedTask) setTask(updatedTask);
     } catch (error) {
       console.error("Failed to pause download:", error);
     }
@@ -86,7 +104,8 @@ export function DownloadProgress({ task: initialTask, onComplete, onCancel }: Do
   const handleResume = () => {
     try {
       resumeDownload(task.id);
-      updateTask();
+      const updatedTask = getDownloadTask(task.id);
+      if (updatedTask) setTask(updatedTask);
     } catch (error) {
       console.error("Failed to resume download:", error);
     }

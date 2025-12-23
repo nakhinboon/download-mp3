@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Media Downloader
 
-## Getting Started
+ดาวน์โหลดวิดีโอจาก YouTube ในรูปแบบ MP3 และ MP4
 
-First, run the development server:
+## ความต้องการของระบบ
+
+- Node.js 18+
+- **yt-dlp** (จำเป็น) - ใช้สำหรับดาวน์โหลดวิดีโอจาก YouTube
+- **FFmpeg** (จำเป็น) - ใช้สำหรับแปลงไฟล์เป็น MP3
+
+## การติดตั้ง
+
+### 1. ติดตั้ง yt-dlp และ FFmpeg
+
+**Windows (ใช้ winget):**
+```bash
+winget install yt-dlp
+```
+คำสั่งนี้จะติดตั้ง yt-dlp และ FFmpeg อัตโนมัติ
+
+**macOS (ใช้ Homebrew):**
+```bash
+brew install yt-dlp ffmpeg
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt update
+sudo apt install ffmpeg
+sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+sudo chmod a+rx /usr/local/bin/yt-dlp
+```
+
+### 2. ติดตั้ง Dependencies
+
+```bash
+npm install
+# หรือ
+bun install
+```
+
+### 3. รัน Development Server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
+# หรือ
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+เปิด [http://localhost:3000](http://localhost:3000) ใน browser
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## การใช้งาน
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. วาง URL YouTube ลงในช่อง input
+2. กดปุ่ม "ค้นหา" เพื่อดึงข้อมูลวิดีโอ
+3. เลือกคุณภาพที่ต้องการ (MP4 หรือ MP3)
+4. กดปุ่ม "ดาวน์โหลด"
 
-## Learn More
+## เทคโนโลยีที่ใช้
 
-To learn more about Next.js, take a look at the following resources:
+- **Next.js 15** - React Framework
+- **TypeScript** - Type Safety
+- **Tailwind CSS** - Styling
+- **shadcn/ui** - UI Components
+- **yt-dlp** - YouTube Download Engine
+- **@distube/ytdl-core** - YouTube Video Info
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## โครงสร้างโปรเจค
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+├── app/
+│   ├── api/
+│   │   ├── download/      # API สำหรับดาวน์โหลด (ใช้ yt-dlp)
+│   │   └── video-info/    # API สำหรับดึงข้อมูลวิดีโอ
+│   ├── layout.tsx
+│   └── page.tsx
+├── components/
+│   ├── quality-selector.tsx
+│   ├── url-input.tsx
+│   ├── video-info-display.tsx
+│   └── download-history.tsx
+├── lib/
+│   ├── youtube-downloader.ts
+│   ├── video-extractor.ts
+│   └── url-parser.ts
+└── tmp/                   # ไฟล์ชั่วคราวสำหรับดาวน์โหลด
+```
 
-## Deploy on Vercel
+## หมายเหตุ
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- ใช้ `yt-dlp` แทน `ytdl-core` เพราะ YouTube บล็อก request จาก server โดยตรง
+- ไฟล์จะถูกดาวน์โหลดไปที่โฟลเดอร์ `tmp/` ก่อนส่งให้ผู้ใช้ แล้วลบทิ้งอัตโนมัติ
+- รองรับเฉพาะ YouTube ในตอนนี้
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## License
+
+MIT

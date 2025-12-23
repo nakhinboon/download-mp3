@@ -1,60 +1,96 @@
 /**
  * Video Info API Endpoint
- * POST /api/video-info
- * Accepts a URL and returns video information
- * 
- * Requirements: 1.1, 4.1
+ * GET /api/video-info?url=...
+ * Fetches real video information from YouTube
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { parseURL } from '@/lib/url-parser';
-import { extractVideoInfo } from '@/lib/video-extractor';
+import { NextRequest, NextResponse } from "next/server";
+import { getYouTubeVideoInfo, isValidYouTubeUrl } from "@/lib/youtube-downloader";
 
-export interface VideoInfoRequest {
-  url: string;
-}
-
-export interface VideoInfoErrorResponse {
-  error: string;
-  code: 'INVALID_URL' | 'UNSUPPORTED_PLATFORM' | 'EXTRACTION_FAILED' | 'MISSING_URL';
-}
-
-export async function POST(request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    const body = await request.json() as VideoInfoRequest;
-    
-    // Validate request body
-    if (!body.url || typeof body.url !== 'string') {
-      return NextResponse.json<VideoInfoErrorResponse>(
-        { error: 'กรุณาใส่ URL', code: 'MISSING_URL' },
+    const { searchParams } = new URL(request.url);
+    const url = searchParams.get("url");
+
+    if (!url) {
+      return NextResponse.json(
+        { error: "กรุณาระบุ URL", code: "MISSING_URL" },
         { status: 400 }
       );
     }
 
-    const url = body.url.trim();
-    
-    // Parse and validate URL
-    const parsedUrl = parseURL(url);
-    
-    if (!parsedUrl) {
-      return NextResponse.json<VideoInfoErrorResponse>(
-        { error: 'กรุณาใส่ URL ที่ถูกต้อง รองรับเฉพาะ YouTube และ TikTok เท่านั้น', code: 'INVALID_URL' },
+    // Validate YouTube URL
+    if (!isValidYouTubeUrl(url)) {
+      return NextResponse.json(
+        { error: "URL YouTube ไม่ถูกต้อง", code: "INVALID_URL" },
         { status: 400 }
       );
     }
 
-    // Extract video information
-    const videoInfo = await extractVideoInfo(parsedUrl);
+    const videoInfo = await getYouTubeVideoInfo(url);
+    const duration = videoInfo.duration; // in seconds
+
+    // Estimate file sizes based on bitrate and duration
+    // Formula: (bitrate in kbps * duration in seconds * 1000) / 8 = bytes
+    const estimateSize = (bitrateKbps: number) => Math.round((bitrateKbps * duration * 1000) / 8);
+
+    // Typical bitrates for each quality (video + audio combined)
+    const qualityBitrates: Record<string, number> = {
+      "360p": 700,   // ~700 kbps
+      "480p": 1500,  // ~1.5 Mbps
+      "720p": 3000,  // ~3 Mbps
+      "1080p": 6000, // ~6 Mbps
+    };
+
+    // Transform to frontend format - yt-dlp can merge any quality
+    const qualities = [];
+    const qualityLabels = ["360p", "480p", "720p", "1080p"];
     
-    return NextResponse.json(videoInfo, { status: 200 });
-    
+    for (const label of qualityLabels) {
+      const format = videoInfo.formats.find(
+        (f) => f.qualityLabel === label && f.hasVideo
+      );
+      const estimatedBitrate = qualityBitrates[label] || 3000;
+      const fileSize = format?.contentLength 
+        ? parseInt(format.contentLength, 10) 
+        : estimateSize(estimatedBitrate);
+      
+      qualities.push({
+        quality: label,
+        format: "mp4",
+        fileSize,
+        bitrate: format?.bitrate || estimatedBitrate * 1000,
+        available: true,
+        recommended: label === "1080p",
+      });
+    }
+
+    // Add MP3 option - 320kbps
+    qualities.push({
+      quality: "320kbps",
+      format: "mp3",
+      fileSize: estimateSize(320), // 320 kbps
+      bitrate: 320,
+      available: true,
+      recommended: false,
+    });
+
+    return NextResponse.json({
+      id: videoInfo.id,
+      title: videoInfo.title,
+      description: videoInfo.description,
+      thumbnail: videoInfo.thumbnail,
+      duration: videoInfo.duration,
+      platform: "youtube",
+      author: videoInfo.author,
+      qualities,
+      originalUrl: url,
+    });
   } catch (error) {
-    console.error('Video info extraction error:', error);
-    
-    const errorMessage = error instanceof Error ? error.message : 'ไม่สามารถดึงข้อมูลวิดีโอได้';
-    
-    return NextResponse.json<VideoInfoErrorResponse>(
-      { error: errorMessage, code: 'EXTRACTION_FAILED' },
+    console.error("Video info error:", error);
+    const message = error instanceof Error ? error.message : "ไม่สามารถดึงข้อมูลวิดีโอได้";
+    return NextResponse.json(
+      { error: message, code: "FETCH_ERROR" },
       { status: 500 }
     );
   }

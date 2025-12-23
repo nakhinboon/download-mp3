@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,42 +38,27 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
-// Custom hook to sync with localStorage
-const listeners = new Set<() => void>();
-
-function subscribe(callback: () => void) {
-  listeners.add(callback);
-  return () => listeners.delete(callback);
-}
-
-function getSnapshot(): DownloadRecord[] {
-  return getHistory();
-}
-
-function getServerSnapshot(): DownloadRecord[] {
-  return [];
-}
-
-function notifyListeners() {
-  listeners.forEach((listener) => listener());
-}
-
 export function DownloadHistory() {
-  const history = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const [history, setHistory] = useState<DownloadRecord[]>([]);
+
+  // Load history on mount (client-side only)
+  useEffect(() => {
+    setHistory(getHistory());
+  }, []);
 
   const handleRefresh = useCallback(() => {
-    notifyListeners();
+    setHistory(getHistory());
   }, []);
 
   const handleDelete = useCallback((id: string) => {
     deleteRecord(id);
-    notifyListeners();
+    setHistory(getHistory());
   }, []);
 
   const handleClearAll = useCallback(() => {
     if (window.confirm("คุณต้องการลบประวัติทั้งหมดหรือไม่?")) {
       clearHistory();
-      notifyListeners();
+      setHistory([]);
     }
   }, []);
 

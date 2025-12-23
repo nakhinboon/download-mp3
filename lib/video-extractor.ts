@@ -6,11 +6,11 @@
 import { ParsedURL } from './url-parser';
 
 // Quality types
-export type VideoQuality = '360p' | '480p' | '720p' | '1080p' | '4k';
+export type VideoQuality = '360p' | '480p' | '720p' | '1080p' | '4k' | '128kbps';
 export type VideoFormat = 'mp4' | 'mp3';
 
 export interface QualityOption {
-  quality: VideoQuality;
+  quality: VideoQuality | string;
   format: VideoFormat;
   fileSize: number; // in bytes
   bitrate?: number; // in kbps
@@ -26,15 +26,17 @@ export interface VideoInfo {
   duration: number; // in seconds
   platform: 'youtube' | 'tiktok';
   qualities: QualityOption[];
+  originalUrl?: string;
 }
 
 // Bitrate mappings for different qualities (in kbps)
-const VIDEO_BITRATES: Record<VideoQuality, number> = {
+const VIDEO_BITRATES: Record<string, number> = {
   '360p': 1000,
   '480p': 2500,
   '720p': 5000,
   '1080p': 8000,
   '4k': 20000,
+  '128kbps': 128,
 };
 
 // Audio bitrate for MP3 extraction (in kbps)
@@ -177,6 +179,7 @@ function simulateYouTubeMetadata(videoId: string): YouTubeVideoMetadata {
 
 /**
  * Extracts video information from a YouTube URL
+ * Uses real API to fetch video info
  * @param parsedUrl - The parsed URL object
  * @returns Promise resolving to VideoInfo
  * @throws Error if extraction fails
@@ -186,25 +189,16 @@ export async function extractYouTubeVideoInfo(parsedUrl: ParsedURL): Promise<Vid
     throw new Error('Invalid platform: expected YouTube URL');
   }
   
-  // In a real implementation, this would fetch from YouTube API
-  // For now, we simulate the metadata
-  const metadata = simulateYouTubeMetadata(parsedUrl.videoId);
+  // Call real API
+  const response = await fetch(`/api/video-info?url=${encodeURIComponent(parsedUrl.originalUrl)}`);
   
-  const qualities = getAvailableQualities(
-    metadata.duration,
-    metadata.availableQualities,
-    metadata.originalQuality
-  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'ไม่สามารถดึงข้อมูลวิดีโอได้');
+  }
   
-  return {
-    id: parsedUrl.videoId,
-    title: metadata.title,
-    description: metadata.description,
-    thumbnail: metadata.thumbnail,
-    duration: metadata.duration,
-    platform: 'youtube',
-    qualities,
-  };
+  const data = await response.json();
+  return data as VideoInfo;
 }
 
 
