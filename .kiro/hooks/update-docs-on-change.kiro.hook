@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "name": "Update Docs on Source Change",
+  "description": "Watches TypeScript source files in app/, components/, and lib/ directories, as well as configuration files, and prompts the agent to update documentation in README.md when changes are detected.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "**/*.ts",
+      "**/*.tsx",
+      "next.config.ts",
+      "package.json",
+      "tsconfig.json"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A source file has been modified. Please review the changes and determine if the README.md documentation needs to be updated to reflect these changes. Consider updating: API documentation, usage examples, configuration instructions, feature descriptions, or any other relevant documentation sections. Only make documentation updates if the code changes are significant enough to warrant it (e.g., new features, changed APIs, modified configuration options)."
+  }
+}
